@@ -8,9 +8,10 @@ environment.So I made this tool to convert files to ros2 for use. At this stage,
 1. [Environment](#1-environment)
 2. [Getting tool](#2-getting-tool)
 3. [Getting started](#3-getting-started)
-4. [Changing configuration](#4-changing-configuration)
+4. [Converting files](#4-converting-files)
 5. [Running launch file](#5-running-launch-file)
-6. [Reference](#5-reference)
+6. [Video of the tool working](#6-video-of-the-tool-working)
+7. [Reference](#7-reference)
 
 ### 1. Environment
 
@@ -24,8 +25,10 @@ environment.So I made this tool to convert files to ros2 for use. At this stage,
 We download the tool from github
 
 ~~~ bash
-git clone https://github.com/xiaoming-sun6/sw2urdf_ros2.git
-~~~ 
+git clone https://github.com/robin840211/sw2urdf_ros2.git
+cd sw2urdf_ros2
+pip3 install -r requirements.txt
+~~~
 
 ### 3. Getting started
 
@@ -39,51 +42,43 @@ cd test_urdf_tool_ws && colcon build
 cd src && ros2 pkg create test_urdf_tool --build-type ament_python
 ~~~
 
-### 4. Changing configuration
+### 4. Converting files
 
-We must change the configuration variables in conversion_urdf_ros_2_ros2.py if we use this tool.
-
-~~~python
-# Configuration variable
-
-# This variable is the path to the solidworks output folder of urdf files
-source_dir = '/home/sxm/Project/ros/test_urdf/'
-
-# This variable is the package path of ros2
-target_dir = '/home/sxm/Project/ros/test_urdf_tool_ws/src/test_urdf_tool/'
-
-# This variable is the package-name of ros2
-package_name = "test_urdf_tool"
-
-# This variable is the solidworks output folder name
-output_folder_name = "test_urdf"
-~~~
-
-After changing the configuration variables, we run the python file in a new terminal.
+Run the python file in a new terminal.
 
 ```bash
-python conversion_urdf_ros_2_ros2.py
+cd <Path_to_tool>/sw2urdf_ros2
+chmod +x conversion_urdf_ros_2_ros2.py
+python3 conversion_urdf_ros_2_ros2.py
 ```
+
+1. Click **Select Source Folder** and select the folder generated from SolidWorks, containing the `urdf` and `meshes` folders.
+2. Click **Select Target Folder** and select the ROS2 package folder, such as `test_urdf_tool_ws/src/test_urdf_tool`.
+3. Click **Start Conversion**.
 
 Then,We go into the workspace and build the code.
 ~~~ bash
-cd .. && colcon build && source install/setup.bash
+cd <Path_to_workspace>/test_urdf_tool_ws && colcon build && source install/setup.bash
 ~~~
 
 ### 5. Running launch file
 Finally，We run the launch files.
 ~~~ bash
-ros2 launch test_urdf_tool launch.py 
+ros2 launch test_urdf_tool launch.py
 ~~~
 
 Don't forget to change the rviz configuration
-![rviz](https://github.com/xiaoming-sun6/sw2urdf_ros2/blob/master/img/rviz.png)
+![rviz](img/rviz.png)
 
-### 5. Reference
+### 6. Video of the tool working
+
+[SW2URDF_Tool.webm](https://github.com/user-attachments/assets/d6172083-35f5-4059-8679-14d393f28a03)
+
+### 7. Reference
 Thanks for the links
 
 [sw2urdf plugin](http://wiki.ros.org/sw_urdf_exporter)  
 [lesson_urdf](https://github.com/olmerg/lesson_urdf)  
 [Source of inspiration](https://zhuanlan.zhihu.com/p/465398486)
 
-
+[sw2urdf_ros2 (forked source)](https://github.com/xiaoming-sun6/sw2urdf_ros2)
