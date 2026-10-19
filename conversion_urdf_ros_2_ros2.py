@@ -6,6 +6,9 @@ from tkinter import filedialog
 from tkinter import messagebox
 import xml.etree.ElementTree as ET
 
+import traceback
+from pathlib import Path
+
 # Configuration variable
 def get_directory(title):
     path = filedialog.askdirectory(title=title)
@@ -26,6 +29,10 @@ def replace_str(file, old_str, new_str):
             file_data += line
     with open(file, "w", encoding="utf-8") as f:
         f.write(file_data)
+
+def create_empty_file(file_path):
+    if not os.path.exists(file_path):
+        Path(file_path).touch()
 
 # Function to modify URDF
 def modify_urdf(urdf_path, package_name):
@@ -79,6 +86,9 @@ class ConversionApp:
         self.root = root
         self.root.title("SolidWorks to ROS2 Conversion")
 
+        # get script directory
+        self.script_dir = Path(__file__).parent.absolute()
+
         self.source_dir = ""
         self.target_dir = ""
 
@@ -107,66 +117,129 @@ class ConversionApp:
         self.target_label.config(text=f"Target Directory: {self.target_dir}")
 
     def start_conversion(self):
-        if not self.source_dir or not self.target_dir:
-            messagebox.showerror("Error", "Please select both source and target directories.")
-            return
+        try:
+            if not self.source_dir or not self.target_dir:
+                messagebox.showerror("Error", "Please select both source and target directories.")
+                return
 
-        package_name = self.target_dir.split("/")[-2]
-        output_folder_name = self.source_dir.split("/")[-2]
+            package_name = self.target_dir.split("/")[-2]
+            # output_folder_name = self.source_dir.split("/")[-2]
 
-        print("Source Directory: " + self.source_dir)
-        print("Target Directory: " + self.target_dir)
-        print("Package Name: " + package_name)
-        print("Output Folder Name: " + output_folder_name)
+            print("Source Directory: " + self.source_dir)
+            print("Target Directory: " + self.target_dir)
+            print("Package Name: " + package_name)
+            # print("Output Folder Name: " + output_folder_name)
 
-        # Create folders
-        run_command_dir(self.target_dir, "mkdir launch meshes meshes/collision meshes/visual urdf")
+            # Find out the frist .urdf in source_dir/urdf
+            urdf_dir = Path(self.source_dir) / "urdf"
+            urdf_files = list(urdf_dir.glob("*.urdf"))
+            if not urdf_files:
+                messagebox.showerror("Error", "No URDF file found in the source directory.")
+                return
 
-        # Copy files
-        # Copy stl files
-        run_command_dir(self.source_dir, f"cp -r ./meshes/* {self.target_dir}meshes/visual")
-        run_command_dir(self.source_dir, f"cp -r ./meshes/* {self.target_dir}meshes/collision")
-        # Copy urdf files
-        run_command_dir(self.source_dir, f"cp  ./urdf/{output_folder_name}.urdf {self.target_dir}urdf/")
+            # Using the first URDF we found (without extension)
+            urdf_filename = urdf_files[0].stem
 
-        # replace files
-        os.system(f"cp -r ./replace_files/world {self.target_dir}")
-        os.system(f"cp -r ./replace_files/config {self.target_dir}")
-        os.system(f"cp -f ./replace_files/setup.py {self.target_dir}")
-        os.system(f"cp -f ./replace_files/package.xml {self.target_dir}")
-        os.system(f"cp -f ./replace_files/launch.py {self.target_dir}launch")
-        os.system(f"cp -f ./replace_files/gz_simulator_launch.py {self.target_dir}launch")
+            # Create folders
+            package_dir = Path(self.target_dir) / package_name
+            os.makedirs(package_dir, exist_ok=True)
+            os.makedirs(f"{self.target_dir}launch", exist_ok=True)
+            os.makedirs(f"{self.target_dir}resource", exist_ok=True)
+            os.makedirs(f"{self.target_dir}meshes/collision", exist_ok=True)
+            os.makedirs(f"{self.target_dir}meshes/visual", exist_ok=True)
+            os.makedirs(f"{self.target_dir}urdf", exist_ok=True)
 
-        # Change file content
-        # launch.py
-        replace_str(f"{self.target_dir}launch/launch.py", "lesson_urdf", package_name)
-        replace_str(f"{self.target_dir}launch/gz_simulator_launch.py", "lesson_urdf", package_name)
-        replace_str(f"{self.target_dir}launch/launch.py", "planar_3dof.urdf", f"{output_folder_name}.urdf")
-        replace_str(f"{self.target_dir}launch/gz_simulator_launch.py", "planar_3dof.urdf", f"{output_folder_name}.urdf")
-        # setup.py
-        replace_str(f"{self.target_dir}setup.py", "lesson_urdf", package_name)
-        # package.xml
-        replace_str(f"{self.target_dir}package.xml", "lesson_urdf", package_name)
-        # urdf files
-        replace_str(f"{self.target_dir}urdf/{output_folder_name}.urdf", f"{output_folder_name}/meshes", f"{package_name}/meshes/visual")
+            # Create __init__.py
+            init_file = package_dir / "__init__.py"
+            create_empty_file(init_file)
+            create_empty_file(f"{self.target_dir}resource/{package_name}")
 
-        # Copy the generated URDF
-        copied_urdf_path = f"{self.target_dir}urdf/{output_folder_name}_modified.urdf"
-        shutil.copy(f"{self.target_dir}urdf/{output_folder_name}.urdf", copied_urdf_path)
+            # Copy files using script directory as base
+            # Copy meshes
+            source_meshes = Path(self.source_dir) / "meshes"
+            target_visual = Path(self.target_dir) / "meshes/visual"
+            target_collision = Path(self.target_dir) / "meshes/collision"
 
-        # Modify the copied URDF
-        modify_urdf(copied_urdf_path, package_name)
+            if source_meshes.exists():
+                for item in source_meshes.glob("*"):
+                    if item.is_file():
+                        shutil.copy2(item, target_visual)
+                        shutil.copy2(item, target_collision)
+                    else:
+                        shutil.copytree(item, target_visual / item.name, dirs_exist_ok=True)
+                        shutil.copytree(item, target_collision / item.name, dirs_exist_ok=True)
 
-        # Generate SDF from modified URDF
-        os.system(f"cd {self.target_dir}urdf/ && gz sdf -p {output_folder_name}_modified.urdf > robot.sdf")
+            # Copy URDF file
+            source_urdf = urdf_files[0]
+            target_urdf = Path(self.target_dir) / "urdf" / f"{urdf_filename}.urdf"
+            shutil.copy2(source_urdf, target_urdf)
 
-        # Modify the generated SDF
-        modify_sdf(f"{self.target_dir}urdf/robot.sdf", f"{self.target_dir}urdf/{output_folder_name}.urdf")
+            # Copy replacement files from script directory
+            replace_files_dir = self.script_dir / "replace_files"
 
-        # Delete the copied URDF
-        os.remove(copied_urdf_path)
+            # Copy directories
+            for dir_name in ['world', 'config']:
+                source_dir = replace_files_dir / dir_name
+                target_dir = Path(self.target_dir) / dir_name
+                if source_dir.exists():
+                    shutil.copytree(source_dir, target_dir, dirs_exist_ok=True)
 
-        messagebox.showinfo("Success", "Conversion completed successfully!")
+            # Copy individual files
+            for file_name in ['setup.py', 'package.xml']:
+                source_file = replace_files_dir / file_name
+                target_file = Path(self.target_dir) / file_name
+                if source_file.exists():
+                    shutil.copy2(source_file, target_file)
+
+            # Copy launch files
+            for launch_file in ['launch.py', 'gz_simulator_launch.py']:
+                source_file = replace_files_dir / launch_file
+                target_file = Path(self.target_dir) / "launch" / launch_file
+                if source_file.exists():
+                    shutil.copy2(source_file, target_file)
+
+            # Change file content
+            # launch.py
+            replace_str(f"{self.target_dir}launch/launch.py", "lesson_urdf", package_name)
+            replace_str(f"{self.target_dir}launch/gz_simulator_launch.py", "lesson_urdf", package_name)
+            # replace_str(f"{self.target_dir}launch/launch.py", "planar_3dof.urdf", f"{output_folder_name}.urdf")
+            # replace_str(f"{self.target_dir}launch/gz_simulator_launch.py", "planar_3dof.urdf", f"{output_folder_name}.urdf")
+            replace_str(f"{self.target_dir}launch/launch.py", "planar_3dof.urdf", f"{urdf_filename}.urdf")
+            replace_str(f"{self.target_dir}launch/gz_simulator_launch.py", "planar_3dof.urdf", f"{urdf_filename}.urdf")
+            # setup.py
+            replace_str(f"{self.target_dir}setup.py", "lesson_urdf", package_name)
+            # package.xml
+            replace_str(f"{self.target_dir}package.xml", "lesson_urdf", package_name)
+            # urdf files
+            # replace_str(f"{self.target_dir}urdf/{output_folder_name}.urdf", f"{output_folder_name}/meshes", f"{package_name}/meshes/visual")
+            replace_str(f"{self.target_dir}urdf/{urdf_filename}.urdf", f"{urdf_filename}/meshes", f"{package_name}/meshes/visual")
+
+            # Copy the generated URDF
+            copied_urdf_path = f"{self.target_dir}urdf/{urdf_filename}_modified.urdf"
+            shutil.copy(f"{self.target_dir}urdf/{urdf_filename}.urdf", copied_urdf_path)
+            # copied_urdf_path = f"{self.target_dir}urdf/{output_folder_name}_modified.urdf"
+            # shutil.copy(f"{self.target_dir}urdf/{output_folder_name}.urdf", copied_urdf_path)
+
+            # Modify the copied URDF
+            modify_urdf(copied_urdf_path, package_name)
+
+            # Generate SDF from modified URDF
+            # os.system(f"cd {self.target_dir}urdf/ && gz sdf -p {output_folder_name}_modified.urdf > robot.sdf")
+            urdf_dir = Path(self.target_dir) / "urdf"
+            os.system(f"cd {urdf_dir} && ign sdf -p {urdf_filename}_modified.urdf > robot.sdf")
+            # Modify the generated SDF
+            # modify_sdf(f"{self.target_dir}urdf/robot.sdf", f"{self.target_dir}urdf/{output_folder_name}.urdf")
+            modify_sdf(
+                f"{self.target_dir}urdf/robot.sdf",
+                f"{self.target_dir}urdf/{urdf_filename}.urdf"
+            )
+            # Delete the copied URDF
+            os.remove(copied_urdf_path)
+            messagebox.showinfo("Success", "Conversion completed successfully!")
+        except Exception as e:
+            err = traceback.format_exc()
+            print(err)
+            messagebox.showerror("Error", "Conversion failed! See console for more details!")
 
 # Run the GUI
 if __name__ == '__main__':
