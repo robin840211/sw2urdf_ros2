@@ -25,7 +25,12 @@ class ConversionResult:
 
 
 def find_urdf_files(source):
-    return sorted((Path(source) / 'urdf').glob('*.urdf'))
+    folder = _input_path(source) / 'urdf'
+    return sorted(path for path in folder.iterdir() if path.is_file() and path.suffix.lower() == '.urdf') if folder.is_dir() else []
+
+
+def _input_path(value):
+    return Path(str(value).strip().strip('"')).expanduser().resolve()
 
 
 def _asset_path(uri, source, urdf_dir):
@@ -34,7 +39,7 @@ def _asset_path(uri, source, urdf_dir):
     if parsed.scheme == 'package':
         path = source / unquote(parsed.path).lstrip('/')
     elif parsed.scheme == 'file':
-        path = Path(url2pathname(unquote(parsed.path)))
+        path = Path(url2pathname(parsed.path))
     elif Path(uri).is_absolute():
         path = Path(uri)
     elif not parsed.scheme:
@@ -54,6 +59,23 @@ def _copy_asset(source, relative, stage, copied):
     target = stage / relative
     target.parent.mkdir(parents=True, exist_ok=True)
     shutil.copy2(str(source), str(target))
+
+
+def _copy_collada_images(asset, relative, stage, source, copied):
+    try:
+        tree = ET.parse(str(asset))
+    except ET.ParseError as error:
+        raise ConversionError('Invalid COLLADA mesh: ' + str(asset)) from error
+    for index, image in enumerate(tree.findall('.//{*}image/{*}init_from')):
+        reference = image.find('{*}ref')
+        value = reference if reference is not None else image
+        if not value.text or not value.text.strip():
+            continue
+        texture = _asset_path(value.text.strip(), source, asset.parent)
+        destination = relative.parent / (relative.stem + '_textures') / str(index) / texture.name
+        _copy_asset(texture, destination, stage, copied)
+        value.text = destination.relative_to(relative.parent).as_posix()
+    tree.write(str(stage / relative), encoding='utf-8', xml_declaration=True)
 
 
 def _prepare_assets(robot, source, source_urdf, stage, package_name):
@@ -77,6 +99,8 @@ def _prepare_assets(robot, source, source_urdf, stage, package_name):
                     relative = Path(asset.name)
             destination = Path('meshes') / kind / relative
             _copy_asset(asset, destination, stage, copied)
+            if asset.suffix.lower() == '.dae':
+                _copy_collada_images(asset, destination, stage, source, copied)
             mesh.set('filename', 'package://' + package_name + '/' + destination.as_posix())
     for texture in robot.findall('.//material/texture'):
         filename = texture.get('filename')
@@ -100,7 +124,8 @@ def _package_files(stage, package_name, urdf_name, robot, generate_sdf):
     for filename in ('setup.py', 'package.xml', 'launch.py', 'rviz/view.rviz'):
         relative = Path('launch/launch.py') if filename == 'launch.py' else Path(filename)
         content = (TEMPLATES / filename).read_text(encoding='utf-8')
-        content = content.replace('lesson_urdf', package_name).replace('planar_3dof.urdf', urdf_name)
+        content = content.replace('lesson_urdf', package_name)
+        content = content.replace("'urdf/planar_3dof.urdf'", repr('urdf/' + urdf_name))
         if filename == 'rviz/view.rviz':
             children = {child.get('link') for child in robot.findall('joint/child')}
             roots = [link.get('name') for link in robot.findall('link') if link.get('name') not in children]
@@ -118,13 +143,14 @@ def _package_files(stage, package_name, urdf_name, robot, generate_sdf):
         for name in ('world', 'config'):
             shutil.copytree(str(TEMPLATES / name), str(stage / name))
         content = (TEMPLATES / 'gz_simulator_launch.py').read_text(encoding='utf-8')
-        content = content.replace('lesson_urdf', package_name).replace('planar_3dof.urdf', urdf_name)
+        content = content.replace('lesson_urdf', package_name)
+        content = content.replace("'urdf/planar_3dof.urdf'", repr('urdf/' + urdf_name))
         (stage / 'launch/gz_simulator_launch.py').write_text(content, encoding='utf-8')
 
 
 def convert_package(source, target, package_name=None, urdf_name=None,
                     generate_sdf=False, sdf_converter=None):
-    source, target = Path(source).resolve(), Path(target).resolve()
+    source, target = _input_path(source), _input_path(target)
     if source == target or source in target.parents or target in source.parents:
         raise ConversionError('Choose separate source and output folders.')
     package_name = package_name or target.name
@@ -132,7 +158,9 @@ def convert_package(source, target, package_name=None, urdf_name=None,
         raise ConversionError('Package name must start with a lowercase letter and use lowercase letters, digits or underscores.')
     candidates = find_urdf_files(source)
     if urdf_name:
-        candidates = [p for p in candidates if p.name == urdf_name]
+        selection = str(urdf_name).strip().strip('"')
+        selected = _input_path(selection) if Path(selection).is_absolute() else (source / 'urdf' / selection).resolve()
+        candidates = [p for p in candidates if p.resolve() == selected]
     if len(candidates) != 1:
         raise ConversionError('Select one URDF file from the source urdf folder.')
     source_urdf = candidates[0]
@@ -152,8 +180,15 @@ def convert_package(source, target, package_name=None, urdf_name=None,
         _package_files(stage, package_name, source_urdf.name, robot, generate_sdf)
         if generate_sdf:
             if sdf_converter is None:
-                raise ConversionError('Select an SDF converter.')
+                from .sdf import SdfConverter
+                sdf_converter = SdfConverter()
             sdf_converter.convert(output_urdf, stage / 'urdf/robot.sdf')
+            version = ET.parse(str(stage / 'urdf/robot.sdf')).getroot().get('version')
+            model = ET.Element('model')
+            ET.SubElement(model, 'name').text = package_name
+            ET.SubElement(model, 'version').text = '1.0'
+            ET.SubElement(model, 'sdf', version=version).text = 'urdf/robot.sdf'
+            ET.ElementTree(model).write(str(stage / 'model.config'), encoding='utf-8', xml_declaration=True)
         shutil.copytree(str(stage), str(target), dirs_exist_ok=True)
     return ConversionResult(package_name, target, target / 'urdf' / source_urdf.name,
                             target / 'urdf/robot.sdf' if generate_sdf else None)

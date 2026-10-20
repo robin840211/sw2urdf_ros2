@@ -93,6 +93,41 @@ class ConversionTests(unittest.TestCase):
         self.assertEqual(result.package_name, 'custom_arm')
         self.assertTrue((self.target / 'resource/custom_arm').is_file())
 
+    def test_pasted_quoted_paths_and_full_urdf_path(self):
+        result = convert_package('"' + str(self.source) + '"', '"' + str(self.target) + '"',
+                                 urdf_name='"' + str(self.source / 'urdf/assembly.urdf') + '"')
+        self.assertTrue(result.urdf_path.is_file())
+
+    def test_quoted_urdf_filename_generates_valid_launch_files(self):
+        original = self.source / 'urdf/assembly.urdf'
+        original.rename(str(self.source / "urdf/arm's.urdf"))
+        convert_package(self.source, self.target)
+        for path in (self.target / 'launch').glob('*.py'):
+            compile(path.read_text(encoding='utf-8'), str(path), 'exec')
+
+    def test_external_collada_images_remain_available_after_conversion(self):
+        assets = self.root / 'external assets'
+        (assets / 'a').mkdir(parents=True)
+        (assets / 'b').mkdir()
+        (assets / 'a/paint.png').write_bytes(b'paint a')
+        (assets / 'b/paint.png').write_bytes(b'paint b')
+        dae = assets / 'part.dae'
+        dae.write_text('''<COLLADA xmlns="http://www.collada.org/2005/11/COLLADASchema">
+          <library_images><image id="a"><init_from>a/paint.png</init_from></image>
+          <image id="b"><init_from>b/paint.png</init_from></image></library_images></COLLADA>''', encoding='utf-8')
+        urdf = self.source / 'urdf/assembly.urdf'
+        tree = ET.parse(str(urdf))
+        tree.find('.//visual/geometry/mesh').set('filename', dae.as_uri())
+        tree.write(str(urdf), encoding='utf-8')
+        before = snapshot(assets)
+        result = convert_package(self.source, self.target)
+        robot = ET.parse(str(result.urdf_path))
+        uri = robot.find('.//visual/geometry/mesh').get('filename')
+        converted = self.target / uri.split('/', 3)[3]
+        images = ET.parse(str(converted)).findall('.//{*}image/{*}init_from')
+        self.assertEqual([(converted.parent / image.text).read_bytes() for image in images], [b'paint a', b'paint b'])
+        self.assertEqual(snapshot(assets), before)
+
     def test_source_and_destination_must_be_separate(self):
         for target in (self.source, self.source / 'generated', self.source.parent):
             with self.subTest(target=target), self.assertRaises(ConversionError):
