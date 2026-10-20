@@ -1,0 +1,8 @@
+name: sw2urdf
+channels:
+  - conda-forge
+dependencies:
+  - python=3.12
+  - tk
+  - sdformat15-python=15.3.0
+  - pip

@@ -1,84 +1,106 @@
 # sw2urdf_ros2
 
-The current solidworks sw2urdf plugin can only be used in ros1, which is obviously unfriendly to the current learning
-environment.So I made this tool to convert files to ros2 for use. At this stage, the tool has only been successfully tested in rviz2.
+Convert a SolidWorks sw2urdf export into a ROS 2 package, with a desktop interface and command line. The generated package includes URDF, meshes, textures, RViz configuration, and launch files. SDF conversion adds a Gazebo model and a `ros_gz` launch file.
 
-### Table of contents
-
-1. [Environment](#1-environment)
-2. [Getting tool](#2-getting-tool)
-3. [Getting started](#3-getting-started)
-4. [Converting files](#4-converting-files)
-5. [Running launch file](#5-running-launch-file)
-6. [Video of the tool working](#6-video-of-the-tool-working)
-7. [Reference](#7-reference)
-
-### 1. Environment
-
-- Solidworks 2019
-- Ubuntu 20.04
-- Ros2 foxy
-- Python == 3.8
-
-### 2. Getting tool
-
-We download the tool from github
-
-~~~ bash
-git clone https://github.com/robin840211/sw2urdf_ros2.git
-cd sw2urdf_ros2
-pip3 install -r requirements.txt
-~~~
-
-### 3. Getting started
-
-We should have an urdf folder that outputs from solidworks.Let's say the name of the folder is test_urdf(I had put this folder in the project as a demo file).
-
-Let's create a workspace called test_urdf_tool_ws and a ROS package called test_urdf_tool
-
-~~~ bash
-mkdir test_urdf_tool_ws && mkdir test_urdf_tool_ws/src
-cd test_urdf_tool_ws && colcon build
-cd src && ros2 pkg create test_urdf_tool --build-type ament_python
-~~~
-
-### 4. Converting files
-
-Run the python file in a new terminal.
+## Install
 
 ```bash
-cd <Path_to_tool>/sw2urdf_ros2
-chmod +x conversion_urdf_ros_2_ros2.py
-python3 conversion_urdf_ros_2_ros2.py
+git clone https://github.com/robin840211/sw2urdf_ros2.git
+cd sw2urdf_ros2
+conda env create -f environment.yml
+conda activate sw2urdf
 ```
 
-1. Click **Select Source Folder** and select the folder generated from SolidWorks, containing the `urdf` and `meshes` folders.
-2. Click **Select Target Folder** and select the ROS2 package folder, such as `test_urdf_tool_ws/src/test_urdf_tool`.
-3. Click **Start Conversion**.
+This environment provides Python 3.12, Tk, and native SDFormat 15.3.0 bindings. Conversion runs locally; ROS 2 is needed when launching the generated package.
 
-Then,We go into the workspace and build the code.
-~~~ bash
-cd <Path_to_workspace>/test_urdf_tool_ws && colcon build && source install/setup.bash
-~~~
+URDF-only conversion also works with Python 3.8+ and its standard library. The desktop interface uses Tkinter, available through the Python installer or your operating system's Tk package.
 
-### 5. Running launch file
-Finally，We run the launch files.
-~~~ bash
-ros2 launch test_urdf_tool launch.py
-~~~
+## Desktop interface
 
-Don't forget to change the rviz configuration
-![rviz](img/rviz.png)
+```bash
+python conversion_urdf_ros_2_ros2.py
+```
 
-### 6. Video of the tool working
+1. Set **Source Folder** to the SolidWorks export folder containing `urdf/` and `meshes/`. The included `test_urdf` folder is an example.
+2. Set **Output Folder** to a new package folder, such as `robot_ws/src/my_robot`.
+3. Set **Package Name**, or leave it empty to use the output folder name. Use lowercase letters, digits, and underscores, starting with a letter.
+4. Choose **URDF File** when the source contains several models.
+5. Keep **Generate SDF** selected to create a Gazebo model, or clear it for URDF-only output.
+6. Click **Start Conversion**. The completed message displays the package folder.
+
+Folder, URDF, and Python fields accept typed or pasted paths, including quoted Windows paths. **SDF Converter** defaults to `auto`, which tries native Python bindings, `gz sdf`, then `ign sdf`. Select `python` to use native bindings explicitly. **SDF Python** selects another Python installation containing the bindings; leave it empty to use the current runtime.
+
+## Command line
+
+Generate a ROS 2 package and SDF:
+
+```bash
+python conversion_urdf_ros_2_ros2.py test_urdf robot_ws/src/my_robot --package-name my_robot
+```
+
+Generate URDF only:
+
+```bash
+python conversion_urdf_ros_2_ros2.py test_urdf robot_ws/src/my_robot --urdf-only
+```
+
+Select a URDF and another native SDFormat environment:
+
+```bash
+python conversion_urdf_ros_2_ros2.py "path/to/export" "robot_ws/src/my_robot" --urdf robot.urdf --sdf-backend python --sdf-python "path/to/environment/python"
+```
+
+`--urdf` accepts a filename inside the source `urdf/` folder or its full path. On Windows, the Python executable is typically `path/to/environment/python.exe`.
+
+| Option | Purpose |
+| --- | --- |
+| `--package-name NAME` | Set the generated ROS 2 package name |
+| `--urdf FILE` | Select the source URDF |
+| `--urdf-only` | Generate URDF and RViz files |
+| `--sdf-backend auto\|python\|gz\|ign` | Select the SDF converter |
+| `--sdf-python EXE` | Use another Python executable for native SDF conversion |
+
+## Use the package
+
+The output folder is a complete `ament_python` package. Put it under a ROS 2 workspace's `src/` folder, then build and source the workspace:
+
+```bash
+cd robot_ws
+colcon build
+source install/setup.bash
+ros2 launch my_robot launch.py
+```
+
+The RViz launch uses `robot_state_publisher`, `joint_state_publisher_gui`, and `rviz2`.
+
+For SDF output, install the `ros_gz_sim` and `ros_gz_bridge` packages for your ROS 2 distribution, then run:
+
+```bash
+ros2 launch my_robot gz_simulator_launch.py
+```
+
+The Gazebo model is stored in `urdf/robot.sdf`, with `model.config` in the package root. Mesh paths remain relative to the generated model.
+
+## Build a desktop application
+
+Activate the native SDFormat environment on the operating system where the application will run:
+
+```bash
+python -m pip install pyinstaller
+python scripts/build.py
+```
+
+Copy the complete `dist/sw2urdf_ros2` folder to the destination computer. Open `sw2urdf_ros2.exe` on Windows or `sw2urdf_ros2` on Linux/macOS to show the interface. The executable accepts the same command-line arguments as the Python script. Use `--output PATH` to choose another distribution folder.
+
+The application includes Tk, native SDFormat libraries, XML schemas, and conversion templates. Build separately on each target operating system and architecture.
+
+## Video
 
 [SW2URDF_Tool.webm](https://github.com/user-attachments/assets/d6172083-35f5-4059-8679-14d393f28a03)
 
-### 7. Reference
-Thanks for the links
+## References
 
-[sw2urdf plugin](http://wiki.ros.org/sw_urdf_exporter)  
-[lesson_urdf](https://github.com/olmerg/lesson_urdf)  
-[Source of inspiration](https://zhuanlan.zhihu.com/p/465398486)
-
-[sw2urdf_ros2 (forked source)](https://github.com/xiaoming-sun6/sw2urdf_ros2)
+- [sw2urdf plugin](http://wiki.ros.org/sw_urdf_exporter)
+- [lesson_urdf](https://github.com/olmerg/lesson_urdf)
+- [Source of inspiration](https://zhuanlan.zhihu.com/p/465398486)
+- [sw2urdf_ros2 (forked source)](https://github.com/xiaoming-sun6/sw2urdf_ros2)
