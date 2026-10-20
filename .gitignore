@@ -1,6 +1,7 @@
 ### Custom ignore files ###
 test/
 .idea/
+*.local
 
 ### Python.gitignore ###
 # Byte-compiled / optimized / DLL files
