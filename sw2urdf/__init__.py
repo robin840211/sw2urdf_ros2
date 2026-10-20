@@ -1,0 +1,1 @@
+"""SolidWorks URDF package conversion."""
