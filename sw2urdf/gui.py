@@ -5,7 +5,7 @@ import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 
 from .core import convert_package, find_urdf_files
-from .sdf import SdfConverter
+from .sdf import SdfConverter, rename_warning
 
 
 class ConversionApp:
@@ -21,6 +21,8 @@ class ConversionApp:
         self.sdf_python = tk.StringVar(value=getattr(options, 'sdf_python', None) or '')
         self.status = tk.StringVar()
         self.results = queue.Queue()
+        self.closed = threading.Event()
+        root.protocol('WM_DELETE_WINDOW', self.close)
         self.running = False
         frame = ttk.Frame(root, padding=16)
         frame.grid(sticky='nsew')
@@ -94,7 +96,8 @@ class ConversionApp:
                          package_name=self.package_name.get() or None,
                          urdf_name=self.urdf_name.get() or None,
                          generate_sdf=self.generate_sdf.get(),
-                         sdf_converter=SdfConverter(self.backend.get(), self.sdf_python.get() or None))
+                         sdf_converter=SdfConverter(self.backend.get(), self.sdf_python.get() or None,
+                                                    self.confirm_rename))
         self.running = True
         self.convert_button.state(['disabled'])
         self.status.set('Converting...')
@@ -106,20 +109,40 @@ class ConversionApp:
         except Exception as error:
             self.results.put((False, str(error)))
 
+    def close(self):
+        self.closed.set()
+        self.root.destroy()
+
+    def confirm_rename(self, changes):
+        response = queue.Queue()
+        self.results.put(('confirm', (changes, response)))
+        while not self.closed.is_set():
+            try:
+                return response.get(timeout=0.1)
+            except queue.Empty:
+                pass
+        return False
+
     def check_result(self):
         try:
             success, result = self.results.get_nowait()
         except queue.Empty:
             pass
         else:
-            self.running = False
-            self.convert_button.state(['!disabled'])
-            if success:
-                self.status.set('Completed: ' + str(result.output_dir))
+            if success == 'confirm':
+                changes, response = result
+                response.put(messagebox.askyesno('SDF name conflict', rename_warning(changes),
+                                                icon='warning', default='no', parent=self.root))
             else:
-                self.status.set('Conversion failed')
-                messagebox.showerror('Error', result)
-        self.root.after(100, self.check_result)
+                self.running = False
+                self.convert_button.state(['!disabled'])
+                if success:
+                    self.status.set('Completed: ' + str(result.output_dir))
+                else:
+                    self.status.set('Conversion failed')
+                    messagebox.showerror('Error', result)
+        if not self.closed.is_set():
+            self.root.after(100, self.check_result)
 
 
 def launch_gui(options=None):

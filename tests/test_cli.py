@@ -38,6 +38,25 @@ class CliTests(unittest.TestCase):
             self.assertIn('gz', result.stderr)
             self.assertFalse(target.exists())
 
+    def test_declined_collision_reports_error_without_creating_output(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            source = root / 'source'
+            (source / 'urdf').mkdir(parents=True)
+            urdf = source / 'urdf/assembly.urdf'
+            urdf.write_text('<robot name="assembly"><link name="tip"/><joint name="tip" type="fixed"/></robot>', encoding='utf-8')
+            before = urdf.read_bytes()
+            for answer in ('NO\n', ''):
+                with self.subTest(answer=answer):
+                    target = root / 'robot_description'
+                    result = subprocess.run([sys.executable, str(SCRIPT), str(source), str(target)],
+                                            input=answer, capture_output=True, text=True, timeout=15)
+                    self.assertEqual(result.returncode, 1)
+                    self.assertIn('tip -> tip_joint', result.stderr)
+                    self.assertIn('cancelled', result.stderr)
+                    self.assertFalse(target.exists())
+                    self.assertEqual(urdf.read_bytes(), before)
+
 
 if __name__ == '__main__':
     unittest.main()

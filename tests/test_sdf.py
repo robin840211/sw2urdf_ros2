@@ -92,6 +92,47 @@ class SdfTests(unittest.TestCase):
         self.assertEqual(existing.read_text(encoding='utf-8'), 'keep')
         self.assertEqual([p.name for p in target.iterdir()], ['package.xml'])
 
+    def test_approved_names_are_unique_and_joint_references_follow(self):
+        robot = ET.fromstring('''<robot name="demo"><link name="tip"/>
+          <link name="tip_joint"/><joint name="tip" type="fixed"/>
+          <joint name="follower" type="revolute"><mimic joint="tip"/></joint>
+          <transmission name="drive"><joint name="tip"/></transmission>
+          <gazebo reference="tip"><preserveFixedJoint>true</preserveFixedJoint></gazebo>
+          <gazebo reference="tip"><material>Gazebo/Red</material></gazebo></robot>''')
+        decisions = []
+        backend = SdfConverter(confirm_rename=lambda changes: decisions.append(changes) or True)
+        backend.prepare_urdf(robot)
+        self.assertEqual(decisions, [{'tip': 'tip_joint_2'}])
+        self.assertEqual(robot.find('joint').get('name'), 'tip_joint_2')
+        self.assertEqual(robot.find('.//mimic').get('joint'), 'tip_joint_2')
+        self.assertEqual(robot.find('transmission/joint').get('name'), 'tip_joint_2')
+        self.assertEqual([g.get('reference') for g in robot.findall('gazebo')], ['tip_joint_2', 'tip'])
+        backend.prepare_urdf(robot)
+        self.assertEqual(len(decisions), 1)
+
+    def test_rejected_names_preserve_source_and_existing_package(self):
+        source = self.folder / 'source'
+        (source / 'urdf').mkdir(parents=True)
+        urdf = source / 'urdf/test.urdf'
+        urdf.write_text('<robot name="demo"><link name="tip"/><joint name="tip" type="fixed"/></robot>', encoding='utf-8')
+        before = urdf.read_bytes()
+        target = self.folder / 'robot_description'
+        target.mkdir()
+        (target / 'package.xml').write_text('keep', encoding='utf-8')
+        backend = SdfConverter(confirm_rename=lambda changes: False)
+        with patch.object(backend, '_convert') as convert, self.assertRaisesRegex(SdfError, 'cancelled'):
+            convert_package(source, target, generate_sdf=True, sdf_converter=backend)
+        convert.assert_not_called()
+        self.assertEqual(urdf.read_bytes(), before)
+        self.assertEqual((target / 'package.xml').read_text(encoding='utf-8'), 'keep')
+        self.assertEqual([p.name for p in target.iterdir()], ['package.xml'])
+
+    def test_conflicting_names_require_confirmation(self):
+        robot = ET.fromstring('<robot name="demo"><link name="tip"/><joint name="tip"/></robot>')
+        with self.assertRaisesRegex(SdfError, 'cancelled'):
+            SdfConverter().prepare_urdf(robot)
+        self.assertEqual(robot.find('joint').get('name'), 'tip')
+
 
 if __name__ == '__main__':
     unittest.main()

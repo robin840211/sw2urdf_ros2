@@ -2,7 +2,15 @@ import argparse
 import sys
 
 from .core import ConversionError, convert_package
-from .sdf import SdfConverter, SdfError, worker_main
+from .sdf import SdfConverter, SdfError, rename_warning, worker_main
+
+
+def confirm_rename(changes):
+    print('Warning: ' + rename_warning(changes), file=sys.stderr)
+    try:
+        return input('Rename and continue? [YES/NO]: ').strip().lower() in ('y', 'yes')
+    except (EOFError, OSError):
+        return False
 
 
 def main(arguments=None):
@@ -27,7 +35,7 @@ def main(arguments=None):
     if not args.source or not args.target:
         parser.error('provide both source and target folders')
     try:
-        backend = SdfConverter(args.sdf_backend, args.sdf_python)
+        backend = SdfConverter(args.sdf_backend, args.sdf_python, confirm_rename)
         result = convert_package(args.source, args.target, args.package_name, args.urdf,
                                  generate_sdf=not args.urdf_only, sdf_converter=backend)
     except (ConversionError, SdfError, OSError) as error:

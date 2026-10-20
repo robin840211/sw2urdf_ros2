@@ -170,6 +170,13 @@ def convert_package(source, target, package_name=None, urdf_name=None,
         raise ConversionError('Invalid URDF: ' + str(error)) from error
     if robot.tag != 'robot':
         raise ConversionError('URDF must contain a robot element.')
+    if generate_sdf:
+        if sdf_converter is None:
+            from .sdf import SdfConverter
+            sdf_converter = SdfConverter()
+        prepare = getattr(sdf_converter, 'prepare_urdf', None)
+        if prepare:
+            prepare(robot)
     target.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix='sw2urdf-', dir=str(target.parent)) as temporary:
         stage = Path(temporary)
@@ -179,9 +186,6 @@ def convert_package(source, target, package_name=None, urdf_name=None,
         ET.ElementTree(robot).write(str(output_urdf), encoding='utf-8', xml_declaration=True)
         _package_files(stage, package_name, source_urdf.name, robot, generate_sdf)
         if generate_sdf:
-            if sdf_converter is None:
-                from .sdf import SdfConverter
-                sdf_converter = SdfConverter()
             sdf_converter.convert(output_urdf, stage / 'urdf/robot.sdf')
             version = ET.parse(str(stage / 'urdf/robot.sdf')).getroot().get('version')
             model = ET.Element('model')

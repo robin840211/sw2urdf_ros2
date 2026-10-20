@@ -17,6 +17,11 @@ class BackendUnavailable(SdfError):
     pass
 
 
+def rename_warning(changes):
+    return ('SDF requires unique link and joint names. Rename these joints?\n\n' +
+            '\n'.join(old + ' -> ' + new for old, new in changes.items()))
+
+
 def convert_with_bindings(source, target):
     dll_handles = []
     directory = Path(sys.executable).parent / 'Library/bin'
@@ -40,12 +45,46 @@ def convert_with_bindings(source, target):
 
 
 class SdfConverter:
-    def __init__(self, backend='auto', python_executable=None):
+    def __init__(self, backend='auto', python_executable=None, confirm_rename=None):
         if backend not in ('auto', 'python', 'gz', 'ign'):
             raise SdfError('Unknown SDF backend: ' + backend)
         self.backend = backend
         self.python_executable = str(Path(str(python_executable).strip().strip('"')).expanduser()) if python_executable else None
         self.selected_backend = None
+        self.confirm_rename = confirm_rename
+
+    def prepare_urdf(self, robot):
+        links = {link.get('name') for link in robot.findall('link')}
+        used = links | {joint.get('name') for joint in robot.findall('joint')}
+        changes = {}
+        for joint in robot.findall('joint'):
+            name = joint.get('name')
+            if name not in links:
+                continue
+            renamed, index = name + '_joint', 2
+            while renamed in used:
+                renamed = name + '_joint_' + str(index)
+                index += 1
+            changes[name] = renamed
+            used.add(renamed)
+        if not changes:
+            return
+        if self.confirm_rename is None or not self.confirm_rename(dict(changes)):
+            raise SdfError('Conversion cancelled: SDF link and joint name conflicts: ' + ', '.join(changes))
+        for joint in robot.findall('joint') + robot.findall('transmission/joint'):
+            if joint.get('name') in changes:
+                joint.set('name', changes[joint.get('name')])
+        for mimic in robot.findall('joint/mimic'):
+            if mimic.get('joint') in changes:
+                mimic.set('joint', changes[mimic.get('joint')])
+        joint_options = {'preserveFixedJoint', 'provideFeedback', 'implicitSpringDamper',
+                         'stopCfm', 'stopErp', 'fudgeFactor', 'springReference', 'springStiffness'}
+        for gazebo in robot.findall('gazebo'):
+            if gazebo.get('reference') in changes and any(child.tag in joint_options for child in gazebo):
+                gazebo.set('reference', changes[gazebo.get('reference')])
+        for element in robot.iter():
+            if element.tag in ('joint_name', 'jointName') and (element.text or '').strip() in changes:
+                element.text = changes[element.text.strip()]
 
     def _run(self, command, cwd):
         try:
@@ -87,6 +126,7 @@ class SdfConverter:
     def convert(self, source, target):
         source, target = Path(source).resolve(), Path(target).resolve()
         original = ET.parse(str(source)).getroot()
+        self.prepare_urdf(original)
         fixed = {joint.get('name') for joint in original.findall('joint') if joint.get('type') == 'fixed'}
         resources = {}
         for element in original.iter():
